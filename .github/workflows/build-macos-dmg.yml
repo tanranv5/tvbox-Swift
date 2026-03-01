@@ -1,0 +1,36 @@
+name: Build macOS DMG
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'package_mac.sh'
+      - 'project.yml'
+      - 'tvbox/**'
+      - 'tvbox.xcodeproj/**'
+      - '.github/workflows/build-macos-dmg.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build DMG
+        run: |
+          chmod +x package_mac.sh
+          ./package_mac.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TVBox-macOS-dmg
+          path: TVBox-macOS.dmg
+          if-no-files-found: error
