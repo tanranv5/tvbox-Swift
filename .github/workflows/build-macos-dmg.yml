@@ -2,6 +2,11 @@ name: Build macOS DMG
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Optional custom tag for this release
+        required: false
+        type: string
   push:
     branches: [ main ]
     paths:
@@ -12,25 +17,92 @@ on:
       - '.github/workflows/build-macos-dmg.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
     runs-on: macos-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build DMG
+      - name: Prepare release metadata
+        id: meta
         run: |
-          chmod +x package_mac.sh
-          ./package_mac.sh
+          set -euo pipefail
+          INPUT_TAG="${{ github.event.inputs.release_tag }}"
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="macos-build-$(date +%Y%m%d)-${{ github.run_number }}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Using release tag: $TAG"
 
-      - name: Upload artifact
+      - name: Build arm64 and x64 DMG
+        run: |
+          set -euo pipefail
+
+          build_one() {
+            arch="$1"
+            output_dmg="$2"
+            volume_name="$3"
+
+            echo "Building for architecture: $arch"
+            rm -rf build
+            rm -f "$output_dmg"
+
+            xcodebuild \
+              -project tvbox.xcodeproj \
+              -scheme tvbox-macOS \
+              -configuration Release \
+              SYMROOT="$PWD/build" \
+              ARCHS="$arch" \
+              ONLY_ACTIVE_ARCH=NO \
+              clean build
+
+            app_path="build/Release/TVBox.app"
+            if [ ! -d "$app_path" ]; then
+              echo "Missing app bundle: $app_path"
+              exit 1
+            fi
+
+            dmg_dir="build/dmg_stage_${arch}"
+            rm -rf "$dmg_dir"
+            mkdir -p "$dmg_dir"
+            cp -R "$app_path" "$dmg_dir/"
+            ln -s /Applications "$dmg_dir/Applications"
+
+            hdiutil create \
+              -volname "$volume_name" \
+              -srcfolder "$dmg_dir" \
+              -ov \
+              -format UDZO \
+              "$output_dmg"
+          }
+
+          build_one "arm64" "TVBox-macOS-arm64.dmg" "TVBox-arm64"
+          build_one "x86_64" "TVBox-macOS-x64.dmg" "TVBox-x64"
+
+      - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
           name: TVBox-macOS-dmg
-          path: TVBox-macOS.dmg
+          path: |
+            TVBox-macOS-arm64.dmg
+            TVBox-macOS-x64.dmg
           if-no-files-found: error
+
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: TVBox macOS ${{ steps.meta.outputs.tag }}
+          files: |
+            TVBox-macOS-arm64.dmg
+            TVBox-macOS-x64.dmg
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          overwrite_files: true
