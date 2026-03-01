@@ -2,15 +2,21 @@ import SwiftUI
 
 /// 根视图 - 对应 Android 版 HomeActivity 的 TabView 导航
 struct ContentView: View {
+    /// 首次配置页点击“最近使用”时，当前要写入的输入框目标。
     private enum ApiInputTarget {
         case vod
         case live
     }
     
+    /// 全局状态（配置加载、分栏状态等）。
     @EnvironmentObject var appState: AppState
+    /// 设置页 ViewModel。根视图复用它处理首次配置与多仓库选择。
     @StateObject private var settingsVM = SettingsViewModel()
+    /// 当前主标签索引。
     @State private var selectedTab = 0
+    /// 预留：控制首次配置页显隐（当前逻辑由 `appState.isConfigLoaded` 驱动）。
     @State private var showSetup = false
+    /// 首次配置页历史回填目标输入框。
     @State private var setupInputTarget: ApiInputTarget = .vod
     
     var body: some View {
@@ -21,6 +27,7 @@ struct ContentView: View {
                 setupView
             }
         }
+        .overlay(multiRepoSelectionOverlay)
         .preferredColorScheme(.dark)
         .onAppear {
             // 自动加载已保存的配置
@@ -28,6 +35,7 @@ struct ContentView: View {
             let savedVodUrl = defaults.string(forKey: HawkConfig.API_URL) ?? ""
             let savedLiveUrl = defaults.string(forKey: HawkConfig.LIVE_API_URL) ?? ""
             if !savedVodUrl.isEmpty {
+                // 启动自动恢复配置，避免每次重启都回到首次配置页。
                 Task {
                     await appState.loadConfig(vodUrl: savedVodUrl, liveUrl: savedLiveUrl)
                 }
@@ -35,8 +43,34 @@ struct ContentView: View {
         }
     }
     
+    @ViewBuilder
+    private var multiRepoSelectionOverlay: some View {
+        // 若配置地址解析出“多仓库入口”，在根层统一弹窗，避免被子页面导航遮挡。
+        if let pending = settingsVM.pendingMultiRepoSelection {
+            SelectionModal(
+                title: "选择\(pending.target.title)仓库",
+                icon: "list.bullet.rectangle.portrait.fill",
+                items: pending.options,
+                selectedItem: nil,
+                itemTitle: { $0.name },
+                onSelect: { option in
+                    Task {
+                        await settingsVM.selectPendingMultiRepoOption(option)
+                        if settingsVM.configSuccess {
+                            appState.applyLoadedConfigState()
+                        }
+                    }
+                },
+                onCancel: {
+                    settingsVM.cancelPendingMultiRepoSelection()
+                }
+            )
+        }
+    }
+    
     // MARK: - 主界面
     
+    /// 主体导航容器：iOS 使用 TabView，macOS 使用 NavigationSplitView。
     private var mainTabView: some View {
         #if os(iOS)
         TabView(selection: $selectedTab) {
@@ -105,6 +139,7 @@ struct ContentView: View {
     
     // MARK: - 首次配置页面
     
+    /// 首次启动或未加载配置时的引导页面。
     private var setupView: some View {
         ZStack {
             // 背景装饰
@@ -321,6 +356,7 @@ struct ContentView: View {
         #if os(iOS)
         UIPasteboard.general.string
         #else
+        // macOS 下通过 NSPasteboard 读取纯文本。
         NSPasteboard.general.string(forType: .string)
         #endif
     }
