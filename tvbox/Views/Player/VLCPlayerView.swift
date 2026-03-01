@@ -169,7 +169,7 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
             cacheConfig.live += vodCacheBoostExtraLive
             cacheConfig.file += vodCacheBoostExtraFile
         }
-        let enableFrameDrop = isLive ? bufferMode.enableFrameDrop : true
+        let enableFrameDrop = isLive ? bufferMode.enableFrameDrop : false
         let enableSkipFrames = isLive && bufferMode.enableFrameDrop
         var mediaOptions: [String: Any] = [
             "network-caching": cacheConfig.network,
@@ -179,6 +179,10 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
             "skip-frames": enableSkipFrames ? 1 : 0,
             "http-reconnect": 1
         ]
+        if !isLive {
+            mediaOptions["avcodec-hurry-up"] = 0
+            mediaOptions["clock-jitter"] = 5000000
+        }
 
         if let hwOption = decodeMode.vlcHardwareDecodeOption {
             mediaOptions["avcodec-hw"] = hwOption
@@ -580,11 +584,14 @@ final class VLCPlayerController: NSObject, ObservableObject, VLCMediaPlayerDeleg
     }
     
     private func applyPlaybackRate() {
+        guard mediaPlayer.rate != playbackRate else { return }
         mediaPlayer.rate = playbackRate
     }
 
     private func applyVolume() {
-        mediaPlayer.audio?.volume = Int32(volume)
+        let target = Int32(volume)
+        guard mediaPlayer.audio?.volume != target else { return }
+        mediaPlayer.audio?.volume = target
     }
     
     private func syncDecodeModeFromSettings() {
@@ -1024,7 +1031,8 @@ struct VLCVodPlayerView: View {
                 Text(currentDisplaySeconds.durationString)
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundColor(.white.opacity(0.9))
-                    .frame(width: 45, alignment: .leading)
+                    .lineLimit(1)
+                    .frame(width: 62, alignment: .leading)
                 
                 Slider(
                     value: Binding(
@@ -1049,7 +1057,8 @@ struct VLCVodPlayerView: View {
                 Text(totalDisplayText)
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundColor(.white.opacity(0.6))
-                    .frame(width: 45, alignment: .trailing)
+                    .lineLimit(1)
+                    .frame(width: 62, alignment: .trailing)
             }
             .padding(.horizontal, 4)
             
